@@ -1,0 +1,88 @@
+{
+  "version": "1.0.0",
+  "keywords": [
+    "strapi",
+    "plugin",
+    "strapi-plugin",
+    "media",
+    "media-library",
+    "unused",
+    "cleanup",
+    "upload",
+    "storage",
+    "orphan"
+  ],
+  "type": "commonjs",
+  "exports": {
+    "./package.json": "./package.json",
+    "./strapi-admin": {
+      "types": "./dist/admin/src/index.d.ts",
+      "source": "./admin/src/index.ts",
+      "import": "./dist/admin/index.mjs",
+      "require": "./dist/admin/index.js",
+      "default": "./dist/admin/index.js"
+    },
+    "./strapi-server": {
+      "types": "./dist/server/src/index.d.ts",
+      "source": "./server/src/index.ts",
+      "import": "./dist/server/index.mjs",
+      "require": "./dist/server/index.js",
+      "default": "./dist/server/index.js"
+    }
+  },
+  "files": ["dist", "logo.svg", "logo.png"],
+  "scripts": {
+    "build": "strapi-plugin build",
+    "prepublishOnly": "npm run build",
+    "watch": "strapi-plugin watch",
+    "watch:link": "strapi-plugin watch:link",
+    "verify": "strapi-plugin verify",
+    "test:ts:front": "tsc -p admin/tsconfig.json --noEmit",
+    "test:ts:back": "tsc -p server/tsconfig.json --noEmit"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@strapi/strapi": "^5.48.0",
+    "@strapi/sdk-plugin": "^6.1.1",
+    "prettier": "^3.8.4",
+    "@strapi/design-system": "^2.2.0",
+    "@strapi/icons": "^2.2.0",
+    "react-intl": "^6.8.9",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.30.4",
+    "styled-components": "^6.4.2",
+    "@types/react": "^18.3.31",
+    "@types/react-dom": "^18.3.7",
+    "@strapi/typescript-utils": "^5.48.0",
+    "typescript": "^5.9.3"
+  },
+  "peerDependencies": {
+    "@strapi/strapi": "^5.0.0",
+    "@strapi/design-system": "^2.0.0",
+    "@strapi/icons": "^2.0.0",
+    "react-intl": "^6.8.9",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.30.4",
+    "styled-components": "^6.4.2"
+  },
+  "strapi": {
+    "kind": "plugin",
+    "name": "unused-media",
+    "displayName": "Unused Media",
+    "description": "List and clean unused Strapi Media Library files"
+  },
+  "name": "strapi-plugin-unused-media",
+  "description": "List and clean unused Strapi Media Library files",
+  "license": "MIT",
+  "author": "Paul Richez <pro@paulrichez.fr>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/PaulRichez/strapi-plugin-unused-media.git"
+  },
+  "bugs": {
+    "url": "https://github.com/PaulRichez/strapi-plugin-unused-media/issues"
+  },
+  "homepage": "https://github.com/PaulRichez/strapi-plugin-unused-media#readme"
+}

@@ -1,0 +1,8 @@
+<svg width="256" height="256" viewBox="0 0 256 256" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Unused Media plugin logo">
+  <rect width="256" height="256" rx="56" fill="#4945FF"/>
+  <rect x="56" y="86" width="144" height="104" rx="18" fill="#FFFFFF"/>
+  <circle cx="92" cy="116" r="13" fill="#4945FF"/>
+  <path d="M70 180 L106 136 L130 160 L156 126 L190 180 Z" fill="#4945FF"/>
+  <path d="M188 50 C190 67 195 72 212 74 C195 76 190 81 188 98 C186 81 181 76 164 74 C181 72 186 67 188 50 Z" fill="#FFD43B"/>
+  <path d="M214 116 C215 123 217 125 224 126 C217 127 215 129 214 136 C213 129 211 127 204 126 C211 125 213 123 214 116 Z" fill="#FFD43B"/>
+</svg>
