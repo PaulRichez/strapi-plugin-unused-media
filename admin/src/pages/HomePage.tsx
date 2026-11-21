@@ -16,7 +16,6 @@ import {
   Typography,
   Button,
   Checkbox,
-  Switch,
   Loader,
   EmptyStateLayout,
   SingleSelect,
@@ -34,6 +33,7 @@ import {
   IconButton,
   SimpleMenu,
   MenuItem,
+  Tabs,
 } from "@strapi/design-system";
 import {
   ArrowClockwise,
@@ -109,6 +109,18 @@ interface Stats {
 }
 
 type ViewMode = "grid" | "list";
+type Tab = "unused" | "ignored";
+
+/** One ignore-list entry, as returned by GET /unused-media/ignored. */
+interface IgnoredEntry {
+  id: number;
+  targetType: "file" | "folder";
+  targetId: number;
+  note?: string | null;
+  createdAt: string;
+  file?: FileRow | null;
+  folder?: { id: number; name: string } | null;
+}
 
 /** Strapi stores file size in KB (float). Format with the right unit. */
 const formatSize = (kb: number): string => {
@@ -179,6 +191,14 @@ const DocPreview = styled(Flex)`
   );
 `;
 
+const Thumb = styled.img`
+  width: 48px;
+  height: 48px;
+  flex-shrink: 0;
+  object-fit: cover;
+  border-radius: 4px;
+`;
+
 const CardCheckboxWrapper = styled.div`
   z-index: 1;
 `;
@@ -226,6 +246,40 @@ const RowPreview = ({ file }: { file?: FileRow | null }) => {
     </Flex>
   );
 };
+
+/** Summary tile above the lists: one number, one label, an optional hint. */
+const StatTile = ({
+  label,
+  value,
+  hint,
+  bar,
+  accent,
+}: {
+  label: string;
+  value: string;
+  hint?: string;
+  bar?: number;
+  accent?: boolean;
+}) => (
+  <Box background="neutral0" hasRadius shadow="tableShadow" padding={5} height="100%">
+    <Typography variant="pi" textColor="neutral600" tag="p">
+      {label}
+    </Typography>
+    <Typography variant="alpha" tag="p" textColor={accent ? "danger600" : "neutral800"}>
+      {value}
+    </Typography>
+    {bar !== undefined && (
+      <Box background="neutral150" hasRadius height="6px" marginTop={3} marginBottom={2}>
+        <Box background="danger500" hasRadius height="6px" width={`${bar}%`} />
+      </Box>
+    )}
+    {hint && (
+      <Typography variant="pi" textColor="neutral500" tag="p">
+        {hint}
+      </Typography>
+    )}
+  </Box>
+);
 
 const IgnoreMenu = ({
   file,
@@ -373,9 +427,9 @@ const HomePage = () => {
   const [{ query }, setQuery] = useQueryParams<{
     page?: string;
     pageSize?: string;
-    showIgnored?: string;
     deep?: string;
     view?: string;
+    tab?: string;
   }>();
   const { allowedActions } = useRBAC(PERM);
   const canDelete = Boolean(
@@ -388,9 +442,10 @@ const HomePage = () => {
   const page = Number(query.page) || 1;
   const pageSize = Number(query.pageSize) || DEFAULT_PAGE_SIZE;
   // UI state lives in the URL so back/forward and refresh keep it.
-  const showIgnored = query.showIgnored === "true";
   const deepScan = query.deep === "true";
   const viewMode: ViewMode = query.view === "list" ? "list" : "grid";
+  // "ignored" = dedicated list of the ignore-list (restore / bulk restore).
+  const tab: Tab = query.tab === "ignored" ? "ignored" : "unused";
 
   const [files, setFiles] = React.useState<FileRow[]>([]);
   const [stats, setStats] = React.useState<Stats | null>(null);
@@ -398,6 +453,7 @@ const HomePage = () => {
   const [selected, setSelected] = React.useState<Set<number>>(new Set());
   const [isLoading, setIsLoading] = React.useState(true);
   const [isDeleting, setIsDeleting] = React.useState(false);
+  const [ignoredEntries, setIgnoredEntries] = React.useState<IgnoredEntry[]>([]);
 
   const fetchData = React.useCallback(async () => {
     setIsLoading(true);
@@ -405,7 +461,7 @@ const HomePage = () => {
     try {
       const [filesRes, statsRes] = await Promise.all([
         get(`/unused-media/files`, {
-          params: { page, pageSize, includeIgnored: showIgnored, deep: deepScan },
+          params: { page, pageSize, deep: deepScan },
         }),
         get(`/unused-media/stats`),
       ]);
@@ -417,11 +473,34 @@ const HomePage = () => {
     } finally {
       setIsLoading(false);
     }
-  }, [get, page, pageSize, showIgnored, deepScan, t, toggleNotification]);
+  }, [get, page, pageSize, deepScan, t, toggleNotification]);
+
+  const fetchIgnored = React.useCallback(async () => {
+    setIsLoading(true);
+    setSelected(new Set());
+    try {
+      const [entriesRes, statsRes] = await Promise.all([
+        get(`/unused-media/ignored`),
+        get(`/unused-media/stats`),
+      ]);
+      setIgnoredEntries(entriesRes.data ?? []);
+      setStats(statsRes.data);
+    } catch {
+      toggleNotification({ type: "danger", message: t("notif.loadFailed", "Failed to load.") });
+    } finally {
+      setIsLoading(false);
+    }
+  }, [get, t, toggleNotification]);
+
+  // Rescan / refresh reloads whichever tab is active.
+  const refresh = React.useCallback(
+    () => (tab === "ignored" ? fetchIgnored() : fetchData()),
+    [tab, fetchIgnored, fetchData]
+  );
 
   React.useEffect(() => {
-    fetchData();
-  }, [fetchData]);
+    refresh();
+  }, [refresh]);
 
   const toggle = (id: number) =>
     setSelected((prev) => {
@@ -501,9 +580,28 @@ const HomePage = () => {
             ? t("notif.restoredFolder", "Folder “{name}” restored to the scan.", { name: file.ignoredFolderName || "?" })
             : t("notif.restoredFile", "“{name}” restored to the scan.", { name: file.name }),
       });
-      fetchData();
+      refresh();
     } catch {
       toggleNotification({ type: "danger", message: t("notif.restoreFailed", "Could not restore.") });
+    }
+  };
+
+  /** Restore several ignore-list entries at once (used by the Ignored tab). */
+  const handleRestoreMany = async (ids: number[]) => {
+    if (ids.length === 0) return;
+    setIsDeleting(true);
+    try {
+      await Promise.all(ids.map((id) => del(`/unused-media/ignored/${id}`)));
+      toggleNotification({
+        type: "success",
+        message: t("ignored.restored", "{count} élément(s) remis dans le scan.", { count: ids.length }),
+      });
+      setSelected(new Set());
+      refresh();
+    } catch {
+      toggleNotification({ type: "danger", message: t("notif.restoreFailed", "Could not restore.") });
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -512,6 +610,122 @@ const HomePage = () => {
     stats && stats.totalSizeKb > 0
       ? Math.round((stats.unusedSizeKb / stats.totalSizeKb) * 100)
       : 0;
+
+  const restorableIds = ignoredEntries.map((e) => e.id);
+  const allIgnoredSelected =
+    restorableIds.length > 0 && restorableIds.every((id) => selected.has(id));
+  const toggleAllIgnored = () =>
+    setSelected(() => (allIgnoredSelected ? new Set() : new Set(restorableIds)));
+
+  const ignoredBody = isLoading ? (
+    <Flex justifyContent="center" padding={8}>
+      <Loader>{t("state.loading", "Loading…")}</Loader>
+    </Flex>
+  ) : ignoredEntries.length === 0 ? (
+    <EmptyStateLayout
+      icon={<EyeStriked width="6rem" height="6rem" />}
+      content={t("ignored.empty", "Aucun élément ignoré.")}
+    />
+  ) : (
+    <>
+      <Flex justifyContent="space-between" alignItems="center" paddingBottom={4}>
+        <Flex gap={4} alignItems="center">
+          <Checkbox
+            checked={allIgnoredSelected}
+            onCheckedChange={toggleAllIgnored}
+            disabled={!canIgnore}
+          >
+            {t("toolbar.selectAll", "Select all")}
+          </Checkbox>
+          {selected.size > 0 && (
+            <Typography variant="pi" textColor="neutral600">
+              {t("toolbar.selected", "{count} selected", { count: selected.size })}
+            </Typography>
+          )}
+        </Flex>
+        {canIgnore && selected.size > 0 && (
+          <Button
+            variant="secondary"
+            startIcon={<ArrowClockwise />}
+            onClick={() => handleRestoreMany([...selected])}
+            loading={isDeleting}
+          >
+            {t("ignored.restoreSelected", "Restaurer la sélection")}
+          </Button>
+        )}
+      </Flex>
+      <Flex direction="column" gap={2} alignItems="stretch">
+        {ignoredEntries.map((entry) => {
+          const isFolder = entry.targetType === "folder";
+          const name = isFolder ? entry.folder?.name : entry.file?.name;
+          return (
+            <Flex
+              key={entry.id}
+              gap={4}
+              alignItems="center"
+              background="neutral0"
+              hasRadius
+              shadow="tableShadow"
+              borderColor="neutral150"
+              padding={3}
+            >
+              <Checkbox
+                checked={selected.has(entry.id)}
+                onCheckedChange={() => toggle(entry.id)}
+                disabled={!canIgnore}
+                aria-label={t("toolbar.selectFile", "Select {name}", { name: name ?? "?" })}
+              />
+              {!isFolder && entry.file && isImage(entry.file.mime) ? (
+                <Thumb src={previewUrl(entry.file)} alt="" loading="lazy" />
+              ) : (
+                <Flex
+                  style={{ width: 48, height: 48, flexShrink: 0 }}
+                  justifyContent="center"
+                  alignItems="center"
+                  background="neutral100"
+                  hasRadius
+                >
+                  {isFolder ? <Folder /> : React.createElement(fileIconFor(entry.file?.mime ?? ""))}
+                </Flex>
+              )}
+              <Box style={{ flex: 1, minWidth: 0 }}>
+                <Typography fontWeight="bold" ellipsis>
+                  {name ?? t("ignored.missing", "(supprimé)")}
+                </Typography>
+                <Typography variant="pi" textColor="neutral600" ellipsis>
+                  {isFolder
+                    ? t("ignored.folderSource", "Dossier ignoré")
+                    : t("ignored.fileSource", "Fichier ignoré")}
+                  {entry.note ? ` · ${entry.note}` : ""}
+                </Typography>
+              </Box>
+              <CardBadge>
+                {isFolder
+                  ? t("ignored.folderBadge", "Dossier")
+                  : typeLabel(entry.file?.mime ?? "")}
+              </CardBadge>
+              {entry.file && (
+                <Box minWidth="80px">
+                  <Typography variant="pi" textColor="neutral600">
+                    {formatSize(entry.file.size)}
+                  </Typography>
+                </Box>
+              )}
+              <Button
+                variant="tertiary"
+                size="S"
+                startIcon={<ArrowClockwise />}
+                disabled={!canIgnore}
+                onClick={() => handleRestoreMany([entry.id])}
+              >
+                {t("ignored.restore", "Restaurer")}
+              </Button>
+            </Flex>
+          );
+        })}
+      </Flex>
+    </>
+  );
 
   return (
     <Page.Main>
@@ -522,7 +736,7 @@ const HomePage = () => {
           <Button
             variant="secondary"
             startIcon={<ArrowClockwise />}
-            onClick={fetchData}
+            onClick={refresh}
             loading={isLoading}
           >
             {t("action.rescan", "Rescan")}
@@ -531,27 +745,49 @@ const HomePage = () => {
       />
 
       <Layouts.Content>
+        <Box paddingBottom={4}>
+          <Tabs.Root value={tab} onValueChange={(value: string) => setQuery({ tab: value, page: "1" })}>
+            <Tabs.List aria-label={t("tabs.label", "Vue")}>
+              <Tabs.Trigger value="unused">{t("tabs.unused", "Non utilisés")}</Tabs.Trigger>
+              <Tabs.Trigger value="ignored">
+                {`${t("tabs.ignored", "Ignorés")}${stats ? ` (${stats.ignoredCount})` : ""}`}
+              </Tabs.Trigger>
+            </Tabs.List>
+          </Tabs.Root>
+        </Box>
+
         {stats && (
-          <Box background="neutral0" hasRadius shadow="tableShadow" padding={4} marginBottom={4}>
-            <Typography variant="delta" tag="h2">
-              {t("gauge.total", "{size} total", { size: formatSize(stats.totalSizeKb) })}
-            </Typography>
-            <Box background="neutral150" hasRadius height="8px" marginTop={2} marginBottom={2}>
-              <Box background="danger500" hasRadius height="8px" width={`${unusedPct}%`} />
-            </Box>
-            <Typography variant="pi" textColor="neutral600">
-              {t("gauge.summary", "{size} unused · {count} file(s) ({pct}%)", {
-                size: formatSize(stats.unusedSizeKb),
-                count: stats.unusedCount,
-                pct: unusedPct,
-              })}
-              {stats.ignoredCount > 0
-                ? t("gauge.ignoredSuffix", " · {count} ignored", { count: stats.ignoredCount })
-                : ""}
-            </Typography>
-          </Box>
+          <Grid.Root gap={4} paddingBottom={6}>
+            <Grid.Item col={4} s={12} direction="column" alignItems="stretch">
+              <StatTile
+                label={t("stats.total", "Espace total")}
+                value={formatSize(stats.totalSizeKb)}
+                hint={t("stats.totalHint", "{count} fichier(s)", { count: stats.totalCount })}
+              />
+            </Grid.Item>
+            <Grid.Item col={4} s={12} direction="column" alignItems="stretch">
+              <StatTile
+                label={t("stats.unused", "Inutilisés")}
+                value={formatSize(stats.unusedSizeKb)}
+                hint={t("stats.unusedHint", "{count} fichier(s) · {pct} %", {
+                  count: stats.unusedCount,
+                  pct: unusedPct,
+                })}
+                bar={unusedPct}
+                accent
+              />
+            </Grid.Item>
+            <Grid.Item col={4} s={12} direction="column" alignItems="stretch">
+              <StatTile
+                label={t("stats.ignored", "Ignorés")}
+                value={String(stats.ignoredCount)}
+                hint={t("stats.ignoredHint", "Exclus du scan")}
+              />
+            </Grid.Item>
+          </Grid.Root>
         )}
 
+        {tab === "unused" && (
         <Flex justifyContent="space-between" alignItems="center" paddingBottom={4}>
           <Flex gap={4} alignItems="center">
             <Checkbox
@@ -572,18 +808,6 @@ const HomePage = () => {
                   <List />
                 </Button>
               </Box>
-            </Flex>
-            <Flex tag="label" gap={2} alignItems="center">
-              <Switch
-                checked={showIgnored}
-                onCheckedChange={(checked: boolean) =>
-                  setQuery({ showIgnored: String(checked), page: "1" })
-                }
-                aria-label={t("toolbar.showIgnored", "Show ignored")}
-              />
-              <Typography variant="pi" textColor="neutral600">
-                {t("toolbar.showIgnored", "Show ignored")}
-              </Typography>
             </Flex>
             <Button
               variant={deepScan ? "secondary" : "tertiary"}
@@ -610,8 +834,11 @@ const HomePage = () => {
             </Flex>
           )}
         </Flex>
+        )}
 
-        {isLoading ? (
+        {tab === "ignored" ? (
+          ignoredBody
+        ) : isLoading ? (
           <Flex justifyContent="center" padding={8}>
             <Loader>{t("state.loading", "Loading…")}</Loader>
           </Flex>
@@ -619,7 +846,7 @@ const HomePage = () => {
           <EmptyStateLayout
             icon={<Eye width="6rem" height="6rem" />}
             content={
-              !showIgnored && stats && stats.ignoredCount > 0
+              stats && stats.ignoredCount > 0
                 ? t("empty.withIgnored", "No unused media. {count} ignored — toggle “Show ignored” to see them.", { count: stats.ignoredCount })
                 : t("empty.clean", "No unused media — your library is clean.")
             }
@@ -714,7 +941,7 @@ const HomePage = () => {
           </Flex>
         )}
 
-        {files.length > 0 && (
+        {tab === "unused" && files.length > 0 && (
           <Flex justifyContent="space-between" alignItems="center" paddingTop={4}>
             <Flex gap={2} alignItems="center">
               <SingleSelect
