@@ -1,5 +1,5 @@
 {
-  "version": "1.0.0",
+  "version": "1.1.0",
   "keywords": [
     "strapi",
     "plugin",
@@ -30,7 +30,11 @@
       "default": "./dist/server/index.js"
     }
   },
-  "files": ["dist", "logo.svg", "logo.png"],
+  "files": [
+    "dist",
+    "logo.svg",
+    "logo.png"
+  ],
   "scripts": {
     "build": "strapi-plugin build",
     "prepublishOnly": "npm run build",
